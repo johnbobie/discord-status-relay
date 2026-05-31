@@ -3,6 +3,7 @@ import json
 import asyncio
 import threading
 import traceback
+import time
 import websockets
 from flask import Flask, request, jsonify
 
@@ -16,7 +17,6 @@ current_presence = {
     "activities": []
 }
 
-# Globals set once the gateway is running
 gateway_loop = None
 gateway_ws = None
 
@@ -41,6 +41,7 @@ async def send_presence():
         print(f"Presence updated to: {current_presence}", flush=True)
     except Exception as e:
         print(f"Error sending presence: {e}", flush=True)
+        traceback.print_exc()
 
 
 async def discord_gateway():
@@ -74,7 +75,7 @@ async def discord_gateway():
                         }
                     }
                 }))
-                print("Identified with Discord.", flush=True)
+                print("Identified with Discord. Gateway ready.", flush=True)
 
                 async def heartbeat():
                     while True:
@@ -144,11 +145,19 @@ def update_status():
     current_presence["status"] = status
     current_presence["activities"] = activities
 
+    # Wait up to 15 seconds for the gateway to be ready
+    for _ in range(30):
+        if gateway_loop and gateway_ws:
+            break
+        print("Waiting for gateway to be ready...", flush=True)
+        time.sleep(0.5)
+
     if gateway_loop and gateway_ws:
         asyncio.run_coroutine_threadsafe(send_presence(), gateway_loop)
         print(f"Scheduled presence update: {status}", flush=True)
     else:
-        print("WARNING: Gateway not ready yet, update dropped.", flush=True)
+        print("ERROR: Gateway not ready after 15s.", flush=True)
+        return jsonify({"error": "Gateway not connected, try again in a moment"}), 503
 
     return jsonify({"success": True, "status": status, "activities": activities})
 
