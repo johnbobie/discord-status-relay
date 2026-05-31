@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import threading
+import traceback
 from queue import Queue
 import websockets
 from flask import Flask, request, jsonify
@@ -26,11 +27,12 @@ async def discord_gateway():
 
     while True:
         try:
-            print("Connecting to Discord Gateway...")
+            print("Attempting websocket connection...", flush=True)
             async with websockets.connect(uri) as ws:
+                print("Websocket connected, waiting for HELLO...", flush=True)
                 hello = json.loads(await ws.recv())
+                print(f"HELLO received: {hello}", flush=True)
                 heartbeat_interval = hello["d"]["heartbeat_interval"] / 1000
-                print(f"Connected. Heartbeat interval: {heartbeat_interval}s")
 
                 await ws.send(json.dumps({
                     "op": 2,
@@ -49,12 +51,13 @@ async def discord_gateway():
                         }
                     }
                 }))
-                print("Identified with Discord.")
+                print("Identify sent. Waiting for READY...", flush=True)
 
                 async def heartbeat():
                     while True:
                         await asyncio.sleep(heartbeat_interval)
                         await ws.send(json.dumps({"op": 1, "d": None}))
+                        print("Heartbeat sent.", flush=True)
 
                 async def queue_watcher():
                     while True:
@@ -70,35 +73,42 @@ async def discord_gateway():
                                     "afk": False
                                 }
                             }))
-                            print(f"Presence updated to: {presence}")
+                            print(f"Presence updated to: {presence}", flush=True)
 
                 async def reader():
                     async for message in ws:
                         data = json.loads(message)
+                        print(f"Gateway message op={data.get('op')} t={data.get('t')}", flush=True)
                         if data.get("op") == 7:
-                            print("Discord requested reconnect.")
-                            raise Exception("Reconnect requested")
+                            raise Exception("Discord requested reconnect")
                         if data.get("op") == 9:
-                            print("Invalid session, reconnecting...")
                             raise Exception("Invalid session")
 
                 await asyncio.gather(heartbeat(), queue_watcher(), reader())
 
         except Exception as e:
-            print(f"Gateway error: {e}. Reconnecting in 5s...")
+            print(f"Gateway error: {e}", flush=True)
+            traceback.print_exc()
+            print("Reconnecting in 5s...", flush=True)
             await asyncio.sleep(5)
 
 
 def start_gateway():
-    asyncio.run(discord_gateway())
+    print("Gateway thread started.", flush=True)
+    try:
+        asyncio.run(discord_gateway())
+    except Exception as e:
+        print(f"Fatal gateway thread error: {e}", flush=True)
+        traceback.print_exc()
 
 
 # --- Start gateway when Gunicorn imports this module ---
 if BOT_TOKEN and API_KEY:
+    print("Starting gateway thread...", flush=True)
     t = threading.Thread(target=start_gateway, daemon=True)
     t.start()
 else:
-    print("WARNING: BOT_TOKEN or API_KEY not set. Gateway not started.")
+    print("WARNING: BOT_TOKEN or API_KEY not set. Gateway not started.", flush=True)
 
 
 # --- HTTP Endpoints ---
